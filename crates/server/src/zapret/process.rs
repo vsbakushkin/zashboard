@@ -8,6 +8,15 @@ pub struct NfqwsProcess {
     pub cmdline: Vec<u8>,
 }
 
+impl NfqwsProcess {
+    pub fn command(&self) -> Option<&[u8]> {
+        self.cmdline
+            .split(|byte| *byte == 0)
+            .next()
+            .filter(|command| !command.is_empty())
+    }
+}
+
 pub fn find_nfqws2_process() -> io::Result<Option<NfqwsProcess>> {
     find_process(Path::new("/proc"), NFQWS2_PROCESS_NAME)
 }
@@ -75,6 +84,32 @@ mod tests {
 
         fs::create_dir(&root).expect("failed to create fake proc");
         root
+    }
+
+    #[test]
+    fn extracts_command_from_cmdline() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
+        };
+
+        let result = process.command();
+
+        assert_eq!(result, Some(&b"/opt/zapret2/nfq2/nfqws2"[..]));
+    }
+
+    #[test]
+    fn returns_none_when_command_is_empty() {
+        for cmdline in [b"".as_slice(), b"\0--qnum=200\0".as_slice()] {
+            let process = NfqwsProcess {
+                pid: 123,
+                cmdline: cmdline.to_vec(),
+            };
+
+            let result = process.command();
+
+            assert!(result.is_none());
+        }
     }
 
     #[test]
