@@ -2,12 +2,31 @@ use std::{fs, io, path::Path};
 
 const NFQWS2_PROCESS_NAME: &str = "nfqws2";
 
+#[derive(Debug)]
+pub struct NfqwsProcess {
+    pub pid: u32,
+    pub cmdline: Vec<u8>,
+}
+
+pub fn find_nfqws2_process() -> io::Result<Option<NfqwsProcess>> {
+    find_process(Path::new("/proc"), NFQWS2_PROCESS_NAME)
+}
+
 pub fn find_nfqws2_pid() -> io::Result<Option<u32>> {
     find_process_pid(Path::new("/proc"), NFQWS2_PROCESS_NAME)
 }
 
 pub fn is_nfqws2_running() -> io::Result<bool> {
     find_nfqws2_pid().map(|pid| pid.is_some())
+}
+
+fn find_process(proc_root: &Path, process_name: &str) -> io::Result<Option<NfqwsProcess>> {
+    let Some(pid) = find_process_pid(proc_root, process_name)? else {
+        return Ok(None);
+    };
+
+    let cmdline = read_process_cmdline(proc_root, pid)?;
+    Ok(Some(NfqwsProcess { pid, cmdline }))
 }
 
 fn find_process_pid(proc_root: &Path, process_name: &str) -> io::Result<Option<u32>> {
@@ -33,6 +52,11 @@ fn find_process_pid(proc_root: &Path, process_name: &str) -> io::Result<Option<u
     Ok(None)
 }
 
+fn read_process_cmdline(proc_root: &Path, pid: u32) -> io::Result<Vec<u8>> {
+    let path = proc_root.join(pid.to_string()).join("cmdline");
+    fs::read(path)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -51,6 +75,55 @@ mod tests {
 
         fs::create_dir(&root).expect("failed to create fake proc");
         root
+    }
+
+    #[test]
+    fn returns_process_with_pid_and_cmdline() {
+        let proc_root = create_fake_proc("process-details");
+        let process_dir = proc_root.join("123");
+        let expected = b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0";
+
+        fs::create_dir(&process_dir).expect("failed to create fake process");
+        fs::write(process_dir.join("comm"), "nfqws2\n").expect("failed to write comm");
+        fs::write(process_dir.join("cmdline"), expected).expect("failed to write cmdline");
+
+        let result = find_process(&proc_root, NFQWS2_PROCESS_NAME);
+
+        fs::remove_dir_all(&proc_root).expect("failed to remove fake proc");
+
+        let process = result
+            .expect("process inspection should succeed")
+            .expect("process should be found");
+
+        assert_eq!(process.pid, 123);
+        assert_eq!(process.cmdline, expected);
+    }
+
+    #[test]
+    fn returns_none_when_process_details_are_absent() {
+        let proc_root = create_fake_proc("details-absent");
+
+        let result = find_process(&proc_root, NFQWS2_PROCESS_NAME);
+        fs::remove_dir_all(&proc_root).expect("failed to remove fake proc");
+        let process = result.expect("process inspection should succeed");
+        assert!(process.is_none())
+    }
+
+    #[test]
+    fn propagates_error_when_cmdline_is_missing() {
+        let proc_root = create_fake_proc("missing-cmdline");
+        let process_dir = proc_root.join("123");
+
+        fs::create_dir(&process_dir).expect("failed to create fake process");
+        fs::write(process_dir.join("comm"), "nfqws2\n").expect("failed to write comm");
+
+        let result = find_process(&proc_root, NFQWS2_PROCESS_NAME);
+
+        fs::remove_dir_all(&proc_root).expect("failed to remove fake proc");
+
+        let error = result.expect_err("missing cmdline should produce an error");
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 
     #[test]
@@ -126,5 +199,23 @@ mod tests {
         fs::remove_dir_all(&proc_root).expect("failed to remove fake proc");
 
         result.expect_err("serious I/O error should be propagated");
+    }
+
+    #[test]
+    fn reads_process_cmdline_bytes() {
+        let proc_root = create_fake_proc("process-cmdline");
+        let process_dir = proc_root.join("123");
+        let expected = b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0";
+
+        fs::create_dir(&process_dir).expect("failed to create fake process");
+        fs::write(process_dir.join("cmdline"), expected).expect("failed to write cmdline");
+
+        let result = read_process_cmdline(&proc_root, 123);
+
+        fs::remove_dir_all(&proc_root).expect("failed to remove fake proc");
+
+        let bytes = result.expect("cmdline reading should succeed");
+
+        assert_eq!(bytes, expected);
     }
 }
