@@ -1,5 +1,5 @@
 use super::argument::{self, Argument};
-use std::{fs, io, path::Path};
+use std::{fs, io, path::Path, str};
 
 const NFQWS2_PROCESS_NAME: &str = "nfqws2";
 
@@ -35,6 +35,12 @@ impl NfqwsProcess {
 
     pub fn find_args<'a>(&'a self, name: &'a [u8]) -> impl Iterator<Item = Argument<'a>> {
         self.parsed_args().filter(move |arg| arg.name == name)
+    }
+
+    pub fn queue_number(&self) -> Option<u16> {
+        let value = self.find_arg(b"qnum")?.value?;
+        let value = std::str::from_utf8(value).ok()?;
+        value.parse().ok()
     }
 }
 
@@ -372,6 +378,46 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn returns_queue_number() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
+        };
+
+        assert_eq!(process.queue_number(), Some(200));
+    }
+
+    #[test]
+    fn returns_none_when_queue_number_is_absent() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=0x10000000\0".to_vec(),
+        };
+
+        assert_eq!(process.queue_number(), None);
+    }
+
+    #[test]
+    fn returns_none_when_queue_number_has_no_value() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum\0".to_vec(),
+        };
+
+        assert_eq!(process.queue_number(), None);
+    }
+
+    #[test]
+    fn returns_none_when_queue_number_is_invalid() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=abc\0".to_vec(),
+        };
+
+        assert_eq!(process.queue_number(), None);
     }
 
     #[test]
