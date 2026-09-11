@@ -28,6 +28,10 @@ impl NfqwsProcess {
     pub fn parsed_args(&self) -> impl Iterator<Item = Argument<'_>> {
         self.args().filter_map(|arg| argument::parse(arg))
     }
+
+    pub fn find_arg(&self, name: &[u8]) -> Option<Argument<'_>> {
+        self.parsed_args().find(|arg| arg.name == name)
+    }
 }
 
 pub fn find_nfqws2_process() -> io::Result<Option<NfqwsProcess>> {
@@ -180,6 +184,65 @@ mod tests {
                     value: None,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn finds_argument_by_name() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0--fwmark=0x10000000\0".to_vec(),
+        };
+
+        assert_eq!(
+            process.find_arg(b"qnum"),
+            Some(Argument {
+                name: b"qnum",
+                value: Some(b"200"),
+            })
+        );
+    }
+
+    #[test]
+    fn finds_argument_without_value() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--debug\0".to_vec(),
+        };
+
+        assert_eq!(
+            process.find_arg(b"debug"),
+            Some(Argument {
+                name: b"debug",
+                value: None,
+            })
+        );
+    }
+
+    #[test]
+    fn returns_none_when_argument_is_absent() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
+        };
+
+        assert_eq!(process.find_arg(b"fwmark"), None);
+    }
+
+    #[test]
+    fn returns_first_argument_when_name_is_repeated() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-init=first.lua\0--lua-init=second.lua\0"
+                .to_vec(),
+        };
+
+        assert_eq!(
+            process.find_arg(b"lua-init"),
+            Some(Argument {
+                name: b"lua-init",
+                value: Some(b"first.lua"),
+            })
         );
     }
 
