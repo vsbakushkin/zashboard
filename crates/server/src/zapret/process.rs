@@ -15,6 +15,14 @@ impl NfqwsProcess {
             .next()
             .filter(|command| !command.is_empty())
     }
+
+    pub fn args(&self) -> impl Iterator<Item = &[u8]> {
+        self.cmdline
+            .strip_suffix(&[0])
+            .unwrap_or(&self.cmdline)
+            .split(|byte| *byte == 0)
+            .skip(1)
+    }
 }
 
 pub fn find_nfqws2_process() -> io::Result<Option<NfqwsProcess>> {
@@ -132,6 +140,42 @@ mod tests {
 
         assert_eq!(process.pid, 123);
         assert_eq!(process.cmdline, expected);
+    }
+
+    #[test]
+    fn extracts_arguments_from_cmdline() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0--fwmark=0x10000000\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.args().collect();
+
+        assert_eq!(args, [&b"--qnum=200"[..], &b"--fwmark=0x10000000"[..],]);
+    }
+
+    #[test]
+    fn returns_no_arguments_when_process_has_only_command() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.args().collect();
+
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn returns_no_arguments_when_cmdline_is_empty() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: Vec::new(),
+        };
+
+        let args: Vec<_> = process.args().collect();
+
+        assert!(args.is_empty());
     }
 
     #[test]
