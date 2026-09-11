@@ -9,6 +9,12 @@ pub struct NfqwsProcess {
     pub cmdline: Vec<u8>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum LuaInit<'a> {
+    File(&'a [u8]),
+    Code(&'a [u8]),
+}
+
 impl NfqwsProcess {
     pub fn command(&self) -> Option<&[u8]> {
         self.cmdline
@@ -49,6 +55,18 @@ impl NfqwsProcess {
         let value = value.strip_prefix("0x")?;
 
         u32::from_str_radix(value, 16).ok()
+    }
+
+    pub fn lua_inits(&self) -> impl Iterator<Item = LuaInit<'_>> {
+        self.find_args(b"lua-init").filter_map(|arg| {
+            let value = arg.value?;
+
+            if let Some(path) = value.strip_prefix(b"@") {
+                return Some(LuaInit::File(path));
+            };
+
+            Some(LuaInit::Code(value))
+        })
     }
 }
 
@@ -476,6 +494,74 @@ mod tests {
         };
 
         assert_eq!(process.fwmark(), None);
+    }
+
+    #[test]
+    fn returns_lua_init_files() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
+                        --lua-init=@/opt/zapret2/lua/zapret-lib.lua\0\
+                        --lua-init=@/opt/zapret2/lua/zapret-antidpi.lua\0"
+                .to_vec(),
+        };
+
+        let inits: Vec<_> = process.lua_inits().collect();
+
+        assert_eq!(
+            inits,
+            [
+                LuaInit::File(b"/opt/zapret2/lua/zapret-lib.lua"),
+                LuaInit::File(b"/opt/zapret2/lua/zapret-antidpi.lua"),
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_inline_lua_init_code() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-init=MYVAR=123\0".to_vec(),
+        };
+
+        let inits: Vec<_> = process.lua_inits().collect();
+
+        assert_eq!(inits, [LuaInit::Code(b"MYVAR=123")]);
+    }
+
+    #[test]
+    fn returns_file_and_inline_lua_inits_in_order() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
+                        --lua-init=@first.lua\0\
+                        --lua-init=MYVAR=123\0\
+                        --lua-init=@second.lua\0"
+                .to_vec(),
+        };
+
+        let inits: Vec<_> = process.lua_inits().collect();
+
+        assert_eq!(
+            inits,
+            [
+                LuaInit::File(b"first.lua"),
+                LuaInit::Code(b"MYVAR=123"),
+                LuaInit::File(b"second.lua"),
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_lua_init_without_value() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-init\0--lua-init=@valid.lua\0".to_vec(),
+        };
+
+        let inits: Vec<_> = process.lua_inits().collect();
+
+        assert_eq!(inits, [LuaInit::File(b"valid.lua")]);
     }
 
     #[test]
