@@ -32,6 +32,10 @@ impl NfqwsProcess {
     pub fn find_arg(&self, name: &[u8]) -> Option<Argument<'_>> {
         self.parsed_args().find(|arg| arg.name == name)
     }
+
+    pub fn find_args<'a>(&'a self, name: &'a [u8]) -> impl Iterator<Item = Argument<'a>> {
+        self.parsed_args().filter(move |arg| arg.name == name)
+    }
 }
 
 pub fn find_nfqws2_process() -> io::Result<Option<NfqwsProcess>> {
@@ -304,6 +308,70 @@ mod tests {
         let args: Vec<_> = process.args().collect();
 
         assert!(args.is_empty());
+    }
+
+    #[test]
+    fn finds_all_arguments_by_name() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
+                        --lua-init=first.lua\0\
+                        --qnum=200\0\
+                        --lua-init=second.lua\0"
+                .to_vec(),
+        };
+
+        let args: Vec<_> = process.find_args(b"lua-init").collect();
+
+        assert_eq!(
+            args,
+            [
+                Argument {
+                    name: b"lua-init",
+                    value: Some(b"first.lua"),
+                },
+                Argument {
+                    name: b"lua-init",
+                    value: Some(b"second.lua"),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_no_arguments_when_name_is_absent() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.find_args(b"lua-init").collect();
+
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn finds_repeated_arguments_without_values() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--debug\0--qnum=200\0--debug\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.find_args(b"debug").collect();
+
+        assert_eq!(
+            args,
+            [
+                Argument {
+                    name: b"debug",
+                    value: None,
+                },
+                Argument {
+                    name: b"debug",
+                    value: None,
+                },
+            ]
+        );
     }
 
     #[test]
