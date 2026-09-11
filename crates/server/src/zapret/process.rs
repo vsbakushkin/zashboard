@@ -1,3 +1,4 @@
+use super::argument::{self, Argument};
 use std::{fs, io, path::Path};
 
 const NFQWS2_PROCESS_NAME: &str = "nfqws2";
@@ -22,6 +23,10 @@ impl NfqwsProcess {
             .unwrap_or(&self.cmdline)
             .split(|byte| *byte == 0)
             .skip(1)
+    }
+
+    pub fn parsed_args(&self) -> impl Iterator<Item = Argument<'_>> {
+        self.args().filter_map(|arg| argument::parse(arg))
     }
 }
 
@@ -152,6 +157,66 @@ mod tests {
         let args: Vec<_> = process.args().collect();
 
         assert_eq!(args, [&b"--qnum=200"[..], &b"--fwmark=0x10000000"[..],]);
+    }
+
+    #[test]
+    fn parses_process_arguments() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0--debug\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.parsed_args().collect();
+
+        assert_eq!(
+            args,
+            [
+                Argument {
+                    name: b"qnum",
+                    value: Some(b"200"),
+                },
+                Argument {
+                    name: b"debug",
+                    value: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_invalid_process_arguments() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0invalid\0--debug\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.parsed_args().collect();
+
+        assert_eq!(
+            args,
+            [
+                Argument {
+                    name: b"qnum",
+                    value: Some(b"200"),
+                },
+                Argument {
+                    name: b"debug",
+                    value: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_no_parsed_arguments_when_process_has_no_arguments() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0".to_vec(),
+        };
+
+        let args: Vec<_> = process.parsed_args().collect();
+
+        assert!(args.is_empty());
     }
 
     #[test]
