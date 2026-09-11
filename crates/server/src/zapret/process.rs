@@ -42,6 +42,14 @@ impl NfqwsProcess {
         let value = std::str::from_utf8(value).ok()?;
         value.parse().ok()
     }
+
+    pub fn fwmark(&self) -> Option<u32> {
+        let value = self.find_arg(b"fwmark")?.value?;
+        let value = std::str::from_utf8(value).ok()?;
+        let value = value.strip_prefix("0x")?;
+
+        u32::from_str_radix(value, 16).ok()
+    }
 }
 
 pub fn find_nfqws2_process() -> io::Result<Option<NfqwsProcess>> {
@@ -418,6 +426,56 @@ mod tests {
         };
 
         assert_eq!(process.queue_number(), None);
+    }
+
+    #[test]
+    fn returns_fwmark() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=0x10000000\0".to_vec(),
+        };
+
+        assert_eq!(process.fwmark(), Some(0x10000000));
+    }
+
+    #[test]
+    fn returns_none_when_fwmark_is_absent() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
+        };
+
+        assert_eq!(process.fwmark(), None);
+    }
+
+    #[test]
+    fn returns_none_when_fwmark_has_no_value() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark\0".to_vec(),
+        };
+
+        assert_eq!(process.fwmark(), None);
+    }
+
+    #[test]
+    fn returns_none_when_fwmark_is_invalid() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=0xhello\0".to_vec(),
+        };
+
+        assert_eq!(process.fwmark(), None);
+    }
+
+    #[test]
+    fn returns_none_when_fwmark_has_no_hex_prefix() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=10000000\0".to_vec(),
+        };
+
+        assert_eq!(process.fwmark(), None);
     }
 
     #[test]
