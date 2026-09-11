@@ -1,4 +1,5 @@
 use super::argument::{self, Argument};
+use super::config::{LuaInit, NfqwsConfig};
 use std::{fs, io, path::Path, str};
 
 const NFQWS2_PROCESS_NAME: &str = "nfqws2";
@@ -7,12 +8,6 @@ const NFQWS2_PROCESS_NAME: &str = "nfqws2";
 pub struct NfqwsProcess {
     pub pid: u32,
     pub cmdline: Vec<u8>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum LuaInit<'a> {
-    File(&'a [u8]),
-    Code(&'a [u8]),
 }
 
 impl NfqwsProcess {
@@ -67,6 +62,14 @@ impl NfqwsProcess {
 
             Some(LuaInit::Code(value))
         })
+    }
+
+    pub fn config(&self) -> NfqwsConfig<'_> {
+        NfqwsConfig {
+            queue_number: self.queue_number(),
+            fwmark: self.fwmark(),
+            lua_inits: self.lua_inits().collect(),
+        }
     }
 }
 
@@ -562,6 +565,71 @@ mod tests {
         let inits: Vec<_> = process.lua_inits().collect();
 
         assert_eq!(inits, [LuaInit::File(b"valid.lua")]);
+    }
+
+    #[test]
+    fn builds_nfqws_config() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
+                        --qnum=200\0\
+                        --fwmark=0x10000000\0\
+                        --lua-init=@first.lua\0\
+                        --lua-init=MYVAR=123\0\
+                        --lua-init=@second.lua\0"
+                .to_vec(),
+        };
+
+        assert_eq!(
+            process.config(),
+            NfqwsConfig {
+                queue_number: Some(200),
+                fwmark: Some(0x10000000),
+                lua_inits: vec![
+                    LuaInit::File(b"first.lua"),
+                    LuaInit::Code(b"MYVAR=123"),
+                    LuaInit::File(b"second.lua"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn builds_config_when_optional_arguments_are_absent() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0".to_vec(),
+        };
+
+        assert_eq!(
+            process.config(),
+            NfqwsConfig {
+                queue_number: None,
+                fwmark: None,
+                lua_inits: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn ignores_invalid_values_when_building_config() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
+                        --qnum=invalid\0\
+                        --fwmark=0xhello\0\
+                        --lua-init=@valid.lua\0"
+                .to_vec(),
+        };
+
+        assert_eq!(
+            process.config(),
+            NfqwsConfig {
+                queue_number: None,
+                fwmark: None,
+                lua_inits: vec![LuaInit::File(b"valid.lua")],
+            }
+        );
     }
 
     #[test]
