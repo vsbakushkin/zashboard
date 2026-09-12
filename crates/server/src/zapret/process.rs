@@ -273,6 +273,7 @@ mod tests {
                     LuaInit::Code(b"MYVAR=123"),
                     LuaInit::File(b"second.lua"),
                 ],
+                lua_desyncs: Vec::new(),
             }
         );
     }
@@ -290,6 +291,7 @@ mod tests {
                 queue_number: None,
                 fwmark: None,
                 lua_inits: vec![],
+                lua_desyncs: vec![],
             }
         );
     }
@@ -311,6 +313,7 @@ mod tests {
                 queue_number: None,
                 fwmark: None,
                 lua_inits: vec![LuaInit::File(b"valid.lua")],
+                lua_desyncs: vec![],
             }
         );
     }

@@ -1,4 +1,5 @@
 use super::argument::Argument;
+use super::desync::{self, LuaDesync};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LuaInit<'a> {
@@ -11,6 +12,7 @@ pub struct NfqwsConfig<'a> {
     pub queue_number: Option<u16>,
     pub fwmark: Option<u32>,
     pub lua_inits: Vec<LuaInit<'a>>,
+    pub lua_desyncs: Vec<LuaDesync<'a>>,
 }
 
 impl<'a> NfqwsConfig<'a> {
@@ -46,16 +48,24 @@ impl<'a> NfqwsConfig<'a> {
             })
             .collect();
 
+        let lua_desyncs = args
+            .iter()
+            .filter(|arg| arg.name == b"lua-desync")
+            .filter_map(|arg| arg.value.and_then(desync::parse))
+            .collect();
+
         Self {
             queue_number,
             fwmark,
             lua_inits,
+            lua_desyncs,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::desync::LuaDesyncParam;
     use super::*;
 
     fn arg<'a>(name: &'a [u8], value: Option<&'a [u8]>) -> Argument<'a> {
@@ -70,6 +80,8 @@ mod tests {
             arg(b"lua-init", Some(b"@first.lua")),
             arg(b"lua-init", Some(b"MYVAR=123")),
             arg(b"lua-init", Some(b"@second.lua")),
+            arg(b"lua-desync", Some(b"wssize:wsize=1:scale=6")),
+            arg(b"lua-desync", Some(b"multidisorder:pos=1,midsld")),
         ];
 
         assert_eq!(
@@ -81,6 +93,28 @@ mod tests {
                     LuaInit::File(b"first.lua"),
                     LuaInit::Code(b"MYVAR=123"),
                     LuaInit::File(b"second.lua"),
+                ],
+                lua_desyncs: vec![
+                    LuaDesync {
+                        function: b"wssize",
+                        params: vec![
+                            LuaDesyncParam {
+                                name: b"wsize",
+                                value: Some(b"1"),
+                            },
+                            LuaDesyncParam {
+                                name: b"scale",
+                                value: Some(b"6"),
+                            },
+                        ],
+                    },
+                    LuaDesync {
+                        function: b"multidisorder",
+                        params: vec![LuaDesyncParam {
+                            name: b"pos",
+                            value: Some(b"1,midsld"),
+                        }],
+                    },
                 ],
             }
         );
@@ -94,6 +128,7 @@ mod tests {
                 queue_number: None,
                 fwmark: None,
                 lua_inits: vec![],
+                lua_desyncs: vec![],
             }
         );
     }
@@ -112,6 +147,7 @@ mod tests {
                 queue_number: None,
                 fwmark: None,
                 lua_inits: vec![LuaInit::File(b"valid.lua")],
+                lua_desyncs: vec![],
             }
         );
     }
@@ -129,6 +165,7 @@ mod tests {
                 queue_number: None,
                 fwmark: None,
                 lua_inits: vec![LuaInit::File(b"valid.lua")],
+                lua_desyncs: vec![],
             }
         );
     }
