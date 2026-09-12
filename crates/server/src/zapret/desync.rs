@@ -16,6 +16,11 @@ pub struct Wssize {
     pub scale: Option<u32>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct Multidisorder<'a> {
+    pub positions: Vec<&'a [u8]>,
+}
+
 impl<'a> LuaDesync<'a> {
     pub fn find_param(&self, name: &[u8]) -> Option<&LuaDesyncParam<'a>> {
         self.params.iter().find(|param| param.name == name)
@@ -34,6 +39,22 @@ impl<'a> LuaDesync<'a> {
         let scale = self.param_u32(b"scale");
 
         Some(Wssize { wsize, scale })
+    }
+
+    pub fn as_multidisorder(&self) -> Option<Multidisorder<'a>> {
+        if self.function != b"multidisorder" {
+            return None;
+        }
+
+        let positions = match self.find_param(b"pos").and_then(|param| param.value) {
+            Some(value) => value
+                .split(|byte| *byte == b',')
+                .map(|pos| (!pos.is_empty()).then_some(pos))
+                .collect::<Option<Vec<_>>>()?,
+            None => Vec::new(),
+        };
+
+        Some(Multidisorder { positions })
     }
 }
 
@@ -437,5 +458,77 @@ mod tests {
                 scale: Some(6),
             })
         );
+    }
+
+    #[test]
+    fn converts_multidisorder_desync() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1,midsld"),
+            }],
+        };
+
+        assert_eq!(
+            desync.as_multidisorder(),
+            Some(Multidisorder {
+                positions: vec![b"1", b"midsld"],
+            })
+        );
+    }
+
+    #[test]
+    fn preserves_symbolic_multidisorder_positions() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"midsld-1,endhost"),
+            }],
+        };
+
+        assert_eq!(
+            desync.as_multidisorder(),
+            Some(Multidisorder {
+                positions: vec![b"midsld-1", b"endhost"],
+            })
+        );
+    }
+
+    #[test]
+    fn converts_multidisorder_without_positions() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![],
+        };
+
+        assert_eq!(
+            desync.as_multidisorder(),
+            Some(Multidisorder { positions: vec![] })
+        );
+    }
+
+    #[test]
+    fn returns_none_for_non_multidisorder_desync() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![],
+        };
+
+        assert_eq!(desync.as_multidisorder(), None);
+    }
+
+    #[test]
+    fn rejects_empty_multidisorder_position() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1,,midsld"),
+            }],
+        };
+
+        assert_eq!(desync.as_multidisorder(), None);
     }
 }
