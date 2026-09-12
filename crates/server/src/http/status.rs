@@ -1,7 +1,7 @@
 use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
-use crate::zapret::{NfqwsConfig, NfqwsProcess, find_nfqws2_process};
+use crate::zapret::{LuaInit, NfqwsConfig, NfqwsProcess, find_nfqws2_process};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(super) struct Status {
@@ -15,13 +15,36 @@ pub(super) struct Status {
 struct ConfigStatus {
     queue_number: Option<u16>,
     fwmark: Option<u32>,
+    lua_inits: Vec<LuaInitStatus>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "value")]
+enum LuaInitStatus {
+    File(String),
+    Code(String),
+}
+
+impl From<&LuaInit<'_>> for LuaInitStatus {
+    fn from(init: &LuaInit<'_>) -> Self {
+        match init {
+            LuaInit::File(value) => {
+                LuaInitStatus::File(String::from_utf8_lossy(value).into_owned())
+            }
+            LuaInit::Code(value) => {
+                LuaInitStatus::Code(String::from_utf8_lossy(value).into_owned())
+            }
+        }
+    }
 }
 
 impl From<&NfqwsConfig<'_>> for ConfigStatus {
     fn from(config: &NfqwsConfig<'_>) -> Self {
+        let lua_inits = config.lua_inits.iter().map(LuaInitStatus::from).collect();
         Self {
             queue_number: config.queue_number,
             fwmark: config.fwmark,
+            lua_inits,
         }
     }
 }
@@ -69,7 +92,9 @@ mod tests {
             pid: 123,
             cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
                         --qnum=200\0\
-                        --fwmark=0x10000000\0"
+                        --fwmark=0x10000000\0\
+                        --lua-init=@/opt/zapret2/lua/zapret-lib.lua\0\
+                        --lua-init=MYVAR=123\0"
                 .to_vec(),
         };
 
@@ -84,7 +109,17 @@ mod tests {
                 "command": "/opt/zapret2/nfq2/nfqws2",
                 "config": {
                     "queue_number": 200,
-                    "fwmark": 268435456
+                    "fwmark": 268435456,
+                    "lua_inits": [
+                        {
+                            "type": "File",
+                            "value": "/opt/zapret2/lua/zapret-lib.lua"
+                        },
+                        {
+                            "type": "Code",
+                            "value": "MYVAR=123"
+                        }
+                    ]
                 }
             })
         );
@@ -101,7 +136,7 @@ mod tests {
                 "running": false,
                 "pid": null,
                 "command": null,
-                "config": null
+                "config": null,
             })
         );
     }
@@ -124,7 +159,8 @@ mod tests {
                 "command": "/opt/zapret2/nfq2/nfqws2",
                 "config": {
                     "queue_number": null,
-                    "fwmark": null
+                    "fwmark": null,
+                    "lua_inits": []
                 }
             })
         );
