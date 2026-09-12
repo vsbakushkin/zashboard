@@ -10,6 +10,12 @@ pub struct LuaDesyncParam<'a> {
     pub value: Option<&'a [u8]>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct Wssize {
+    pub wsize: Option<u32>,
+    pub scale: Option<u32>,
+}
+
 impl<'a> LuaDesync<'a> {
     pub fn find_param(&self, name: &[u8]) -> Option<&LuaDesyncParam<'a>> {
         self.params.iter().find(|param| param.name == name)
@@ -17,6 +23,17 @@ impl<'a> LuaDesync<'a> {
 
     pub fn param_u32(&self, name: &[u8]) -> Option<u32> {
         self.find_param(name).and_then(LuaDesyncParam::parse_u32)
+    }
+
+    pub fn as_wssize(&self) -> Option<Wssize> {
+        if self.function != b"wssize" {
+            return None;
+        }
+
+        let wsize = self.param_u32(b"wsize");
+        let scale = self.param_u32(b"scale");
+
+        Some(Wssize { wsize, scale })
     }
 }
 
@@ -338,5 +355,87 @@ mod tests {
         };
 
         assert_eq!(desync.param_u32(b"scale"), None);
+    }
+
+    #[test]
+    fn converts_wssize_desync() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![
+                LuaDesyncParam {
+                    name: b"wsize",
+                    value: Some(b"1"),
+                },
+                LuaDesyncParam {
+                    name: b"scale",
+                    value: Some(b"6"),
+                },
+            ],
+        };
+
+        assert_eq!(
+            desync.as_wssize(),
+            Some(Wssize {
+                wsize: Some(1),
+                scale: Some(6),
+            })
+        );
+    }
+
+    #[test]
+    fn converts_wssize_with_missing_optional_param() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![LuaDesyncParam {
+                name: b"wsize",
+                value: Some(b"1"),
+            }],
+        };
+
+        assert_eq!(
+            desync.as_wssize(),
+            Some(Wssize {
+                wsize: Some(1),
+                scale: None,
+            })
+        );
+    }
+
+    #[test]
+    fn returns_none_for_non_wssize_desync() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1"),
+            }],
+        };
+
+        assert_eq!(desync.as_wssize(), None);
+    }
+
+    #[test]
+    fn ignores_invalid_numeric_wssize_params() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![
+                LuaDesyncParam {
+                    name: b"wsize",
+                    value: Some(b"abc"),
+                },
+                LuaDesyncParam {
+                    name: b"scale",
+                    value: Some(b"6"),
+                },
+            ],
+        };
+
+        assert_eq!(
+            desync.as_wssize(),
+            Some(Wssize {
+                wsize: None,
+                scale: Some(6),
+            })
+        );
     }
 }
