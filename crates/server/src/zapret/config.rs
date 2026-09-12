@@ -1,5 +1,5 @@
 use super::argument::Argument;
-use super::desync::{self, LuaDesync};
+use super::desync::{self, LuaDesync, LuaDesyncError, LuaDesyncKind};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LuaInit<'a> {
@@ -16,6 +16,12 @@ pub struct NfqwsConfig<'a> {
 }
 
 impl<'a> NfqwsConfig<'a> {
+    pub fn desync_kinds(
+        &self,
+    ) -> impl Iterator<Item = Result<LuaDesyncKind<'a>, LuaDesyncError>> + '_ {
+        self.lua_desyncs.iter().map(LuaDesync::kind)
+    }
+
     pub fn parse(args: impl IntoIterator<Item = Argument<'a>>) -> Self {
         let args: Vec<Argument<'a>> = args.into_iter().collect();
 
@@ -65,11 +71,96 @@ impl<'a> NfqwsConfig<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::zapret::desync::{Multidisorder, Wssize};
+
     use super::super::desync::LuaDesyncParam;
     use super::*;
 
     fn arg<'a>(name: &'a [u8], value: Option<&'a [u8]>) -> Argument<'a> {
         Argument { name, value }
+    }
+
+    #[test]
+    fn returns_typed_desync_kinds() {
+        let config = NfqwsConfig {
+            queue_number: None,
+            fwmark: None,
+            lua_inits: vec![],
+            lua_desyncs: vec![
+                LuaDesync {
+                    function: b"wssize",
+                    params: vec![
+                        LuaDesyncParam {
+                            name: b"wsize",
+                            value: Some(b"1"),
+                        },
+                        LuaDesyncParam {
+                            name: b"scale",
+                            value: Some(b"6"),
+                        },
+                    ],
+                },
+                LuaDesync {
+                    function: b"multidisorder",
+                    params: vec![LuaDesyncParam {
+                        name: b"pos",
+                        value: Some(b"1,midsld"),
+                    }],
+                },
+            ],
+        };
+
+        let kinds: Vec<_> = config.desync_kinds().collect();
+
+        assert_eq!(
+            kinds,
+            [
+                Ok(LuaDesyncKind::Wssize(Wssize {
+                    wsize: Some(1),
+                    scale: Some(6),
+                })),
+                Ok(LuaDesyncKind::Multidisorder(Multidisorder {
+                    positions: vec![b"1", b"midsld"],
+                })),
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_unknown_desync_kind_in_config() {
+        let config = NfqwsConfig {
+            queue_number: None,
+            fwmark: None,
+            lua_inits: vec![],
+            lua_desyncs: vec![LuaDesync {
+                function: b"custom",
+                params: vec![],
+            }],
+        };
+
+        let kinds: Vec<_> = config.desync_kinds().collect();
+
+        assert_eq!(kinds, [Ok(LuaDesyncKind::Unknown(b"custom"))]);
+    }
+
+    #[test]
+    fn preserves_invalid_desync_error_in_config() {
+        let config = NfqwsConfig {
+            queue_number: None,
+            fwmark: None,
+            lua_inits: vec![],
+            lua_desyncs: vec![LuaDesync {
+                function: b"multidisorder",
+                params: vec![LuaDesyncParam {
+                    name: b"pos",
+                    value: Some(b"1,,midsld"),
+                }],
+            }],
+        };
+
+        let kinds: Vec<_> = config.desync_kinds().collect();
+
+        assert_eq!(kinds, [Err(LuaDesyncError::InvalidParams)]);
     }
 
     #[test]
