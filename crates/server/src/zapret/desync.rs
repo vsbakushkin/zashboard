@@ -11,6 +11,18 @@ pub struct LuaDesyncParam<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum LuaDesyncKind<'a> {
+    Wssize(Wssize),
+    Multidisorder(Multidisorder<'a>),
+    Unknown(&'a [u8]),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum LuaDesyncError {
+    InvalidParams,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct Wssize {
     pub wsize: Option<u32>,
     pub scale: Option<u32>,
@@ -22,6 +34,20 @@ pub struct Multidisorder<'a> {
 }
 
 impl<'a> LuaDesync<'a> {
+    pub fn kind(&self) -> Result<LuaDesyncKind<'a>, LuaDesyncError> {
+        match self.function {
+            b"wssize" => self
+                .as_wssize()
+                .map(LuaDesyncKind::Wssize)
+                .ok_or(LuaDesyncError::InvalidParams),
+            b"multidisorder" => self
+                .as_multidisorder()
+                .map(LuaDesyncKind::Multidisorder)
+                .ok_or(LuaDesyncError::InvalidParams),
+            function => Ok(LuaDesyncKind::Unknown(function)),
+        }
+    }
+
     pub fn find_param(&self, name: &[u8]) -> Option<&LuaDesyncParam<'a>> {
         self.params.iter().find(|param| param.name == name)
     }
@@ -94,6 +120,72 @@ pub fn parse(value: &[u8]) -> Option<LuaDesync<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifies_wssize_kind() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![
+                LuaDesyncParam {
+                    name: b"wsize",
+                    value: Some(b"1"),
+                },
+                LuaDesyncParam {
+                    name: b"scale",
+                    value: Some(b"6"),
+                },
+            ],
+        };
+
+        assert_eq!(
+            desync.kind(),
+            Ok(LuaDesyncKind::Wssize(Wssize {
+                wsize: Some(1),
+                scale: Some(6),
+            }))
+        );
+    }
+
+    #[test]
+    fn identifies_multidisorder_kind() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1,midsld"),
+            }],
+        };
+
+        assert_eq!(
+            desync.kind(),
+            Ok(LuaDesyncKind::Multidisorder(Multidisorder {
+                positions: vec![b"1", b"midsld"],
+            }))
+        );
+    }
+
+    #[test]
+    fn preserves_unknown_desync_kind() {
+        let desync = LuaDesync {
+            function: b"custom",
+            params: vec![],
+        };
+
+        assert_eq!(desync.kind(), Ok(LuaDesyncKind::Unknown(b"custom")));
+    }
+
+    #[test]
+    fn rejects_invalid_known_desync_kind() {
+        let desync = LuaDesync {
+            function: b"multidisorder",
+            params: vec![LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1,,midsld"),
+            }],
+        };
+
+        assert_eq!(desync.kind(), Err(LuaDesyncError::InvalidParams));
+    }
 
     #[test]
     fn finds_desync_param_by_name() {
