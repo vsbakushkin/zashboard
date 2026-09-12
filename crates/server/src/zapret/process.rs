@@ -1,6 +1,6 @@
 use super::argument::{self, Argument};
-use super::config::{LuaInit, NfqwsConfig};
-use std::{fs, io, path::Path, str};
+use super::config::NfqwsConfig;
+use std::{fs, io, path::Path};
 
 const NFQWS2_PROCESS_NAME: &str = "nfqws2";
 
@@ -27,49 +27,11 @@ impl NfqwsProcess {
     }
 
     pub fn parsed_args(&self) -> impl Iterator<Item = Argument<'_>> {
-        self.args().filter_map(|arg| argument::parse(arg))
-    }
-
-    pub fn find_arg(&self, name: &[u8]) -> Option<Argument<'_>> {
-        self.parsed_args().find(|arg| arg.name == name)
-    }
-
-    pub fn find_args<'a>(&'a self, name: &'a [u8]) -> impl Iterator<Item = Argument<'a>> {
-        self.parsed_args().filter(move |arg| arg.name == name)
-    }
-
-    pub fn queue_number(&self) -> Option<u16> {
-        let value = self.find_arg(b"qnum")?.value?;
-        let value = std::str::from_utf8(value).ok()?;
-        value.parse().ok()
-    }
-
-    pub fn fwmark(&self) -> Option<u32> {
-        let value = self.find_arg(b"fwmark")?.value?;
-        let value = std::str::from_utf8(value).ok()?;
-        let value = value.strip_prefix("0x")?;
-
-        u32::from_str_radix(value, 16).ok()
-    }
-
-    pub fn lua_inits(&self) -> impl Iterator<Item = LuaInit<'_>> {
-        self.find_args(b"lua-init").filter_map(|arg| {
-            let value = arg.value?;
-
-            if let Some(path) = value.strip_prefix(b"@") {
-                return Some(LuaInit::File(path));
-            };
-
-            Some(LuaInit::Code(value))
-        })
+        self.args().filter_map(argument::parse)
     }
 
     pub fn config(&self) -> NfqwsConfig<'_> {
-        NfqwsConfig {
-            queue_number: self.queue_number(),
-            fwmark: self.fwmark(),
-            lua_inits: self.lua_inits().collect(),
-        }
+        NfqwsConfig::parse(self.parsed_args())
     }
 }
 
@@ -125,6 +87,8 @@ fn read_process_cmdline(proc_root: &Path, pid: u32) -> io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use crate::zapret::LuaInit;
 
     use super::*;
 
@@ -227,65 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn finds_argument_by_name() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0--fwmark=0x10000000\0".to_vec(),
-        };
-
-        assert_eq!(
-            process.find_arg(b"qnum"),
-            Some(Argument {
-                name: b"qnum",
-                value: Some(b"200"),
-            })
-        );
-    }
-
-    #[test]
-    fn finds_argument_without_value() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--debug\0".to_vec(),
-        };
-
-        assert_eq!(
-            process.find_arg(b"debug"),
-            Some(Argument {
-                name: b"debug",
-                value: None,
-            })
-        );
-    }
-
-    #[test]
-    fn returns_none_when_argument_is_absent() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
-        };
-
-        assert_eq!(process.find_arg(b"fwmark"), None);
-    }
-
-    #[test]
-    fn returns_first_argument_when_name_is_repeated() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-init=first.lua\0--lua-init=second.lua\0"
-                .to_vec(),
-        };
-
-        assert_eq!(
-            process.find_arg(b"lua-init"),
-            Some(Argument {
-                name: b"lua-init",
-                value: Some(b"first.lua"),
-            })
-        );
-    }
-
-    #[test]
     fn ignores_invalid_process_arguments() {
         let process = NfqwsProcess {
             pid: 123,
@@ -343,228 +248,6 @@ mod tests {
         let args: Vec<_> = process.args().collect();
 
         assert!(args.is_empty());
-    }
-
-    #[test]
-    fn finds_all_arguments_by_name() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
-                        --lua-init=first.lua\0\
-                        --qnum=200\0\
-                        --lua-init=second.lua\0"
-                .to_vec(),
-        };
-
-        let args: Vec<_> = process.find_args(b"lua-init").collect();
-
-        assert_eq!(
-            args,
-            [
-                Argument {
-                    name: b"lua-init",
-                    value: Some(b"first.lua"),
-                },
-                Argument {
-                    name: b"lua-init",
-                    value: Some(b"second.lua"),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn returns_no_arguments_when_name_is_absent() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
-        };
-
-        let args: Vec<_> = process.find_args(b"lua-init").collect();
-
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn finds_repeated_arguments_without_values() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--debug\0--qnum=200\0--debug\0".to_vec(),
-        };
-
-        let args: Vec<_> = process.find_args(b"debug").collect();
-
-        assert_eq!(
-            args,
-            [
-                Argument {
-                    name: b"debug",
-                    value: None,
-                },
-                Argument {
-                    name: b"debug",
-                    value: None,
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn returns_queue_number() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
-        };
-
-        assert_eq!(process.queue_number(), Some(200));
-    }
-
-    #[test]
-    fn returns_none_when_queue_number_is_absent() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=0x10000000\0".to_vec(),
-        };
-
-        assert_eq!(process.queue_number(), None);
-    }
-
-    #[test]
-    fn returns_none_when_queue_number_has_no_value() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum\0".to_vec(),
-        };
-
-        assert_eq!(process.queue_number(), None);
-    }
-
-    #[test]
-    fn returns_none_when_queue_number_is_invalid() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=abc\0".to_vec(),
-        };
-
-        assert_eq!(process.queue_number(), None);
-    }
-
-    #[test]
-    fn returns_fwmark() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=0x10000000\0".to_vec(),
-        };
-
-        assert_eq!(process.fwmark(), Some(0x10000000));
-    }
-
-    #[test]
-    fn returns_none_when_fwmark_is_absent() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
-        };
-
-        assert_eq!(process.fwmark(), None);
-    }
-
-    #[test]
-    fn returns_none_when_fwmark_has_no_value() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark\0".to_vec(),
-        };
-
-        assert_eq!(process.fwmark(), None);
-    }
-
-    #[test]
-    fn returns_none_when_fwmark_is_invalid() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=0xhello\0".to_vec(),
-        };
-
-        assert_eq!(process.fwmark(), None);
-    }
-
-    #[test]
-    fn returns_none_when_fwmark_has_no_hex_prefix() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--fwmark=10000000\0".to_vec(),
-        };
-
-        assert_eq!(process.fwmark(), None);
-    }
-
-    #[test]
-    fn returns_lua_init_files() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
-                        --lua-init=@/opt/zapret2/lua/zapret-lib.lua\0\
-                        --lua-init=@/opt/zapret2/lua/zapret-antidpi.lua\0"
-                .to_vec(),
-        };
-
-        let inits: Vec<_> = process.lua_inits().collect();
-
-        assert_eq!(
-            inits,
-            [
-                LuaInit::File(b"/opt/zapret2/lua/zapret-lib.lua"),
-                LuaInit::File(b"/opt/zapret2/lua/zapret-antidpi.lua"),
-            ]
-        );
-    }
-
-    #[test]
-    fn returns_inline_lua_init_code() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-init=MYVAR=123\0".to_vec(),
-        };
-
-        let inits: Vec<_> = process.lua_inits().collect();
-
-        assert_eq!(inits, [LuaInit::Code(b"MYVAR=123")]);
-    }
-
-    #[test]
-    fn returns_file_and_inline_lua_inits_in_order() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0\
-                        --lua-init=@first.lua\0\
-                        --lua-init=MYVAR=123\0\
-                        --lua-init=@second.lua\0"
-                .to_vec(),
-        };
-
-        let inits: Vec<_> = process.lua_inits().collect();
-
-        assert_eq!(
-            inits,
-            [
-                LuaInit::File(b"first.lua"),
-                LuaInit::Code(b"MYVAR=123"),
-                LuaInit::File(b"second.lua"),
-            ]
-        );
-    }
-
-    #[test]
-    fn ignores_lua_init_without_value() {
-        let process = NfqwsProcess {
-            pid: 123,
-            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-init\0--lua-init=@valid.lua\0".to_vec(),
-        };
-
-        let inits: Vec<_> = process.lua_inits().collect();
-
-        assert_eq!(inits, [LuaInit::File(b"valid.lua")]);
     }
 
     #[test]
