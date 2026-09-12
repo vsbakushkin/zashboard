@@ -10,6 +10,12 @@ pub struct LuaDesyncParam<'a> {
     pub value: Option<&'a [u8]>,
 }
 
+impl<'a> LuaDesync<'a> {
+    pub fn find_param(&self, name: &[u8]) -> Option<&LuaDesyncParam<'a>> {
+        self.params.iter().find(|param| param.name == name)
+    }
+}
+
 impl<'a> LuaDesyncParam<'a> {
     pub fn parse(param: &'a [u8]) -> Option<Self> {
         let mut parts = param.splitn(2, |byte| *byte == b'=');
@@ -40,6 +46,69 @@ pub fn parse(value: &[u8]) -> Option<LuaDesync<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_desync_param_by_name() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![
+                LuaDesyncParam {
+                    name: b"wsize",
+                    value: Some(b"1"),
+                },
+                LuaDesyncParam {
+                    name: b"scale",
+                    value: Some(b"6"),
+                },
+            ],
+        };
+
+        assert_eq!(
+            desync.find_param(b"scale"),
+            Some(&LuaDesyncParam {
+                name: b"scale",
+                value: Some(b"6"),
+            })
+        );
+    }
+
+    #[test]
+    fn returns_none_when_desync_param_is_absent() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![LuaDesyncParam {
+                name: b"wsize",
+                value: Some(b"1"),
+            }],
+        };
+
+        assert_eq!(desync.find_param(b"scale"), None);
+    }
+
+    #[test]
+    fn returns_first_desync_param_when_name_is_repeated() {
+        let desync = LuaDesync {
+            function: b"example",
+            params: vec![
+                LuaDesyncParam {
+                    name: b"pos",
+                    value: Some(b"1"),
+                },
+                LuaDesyncParam {
+                    name: b"pos",
+                    value: Some(b"2"),
+                },
+            ],
+        };
+
+        assert_eq!(
+            desync.find_param(b"pos"),
+            Some(&LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1"),
+            })
+        );
+    }
 
     #[test]
     fn parses_desync_param_with_value() {
