@@ -4,6 +4,24 @@ pub struct LuaDesync<'a> {
     pub params: Vec<&'a [u8]>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct LuaDesyncParam<'a> {
+    pub name: &'a [u8],
+    pub value: Option<&'a [u8]>,
+}
+
+impl<'a> LuaDesyncParam<'a> {
+    pub fn parse(param: &'a [u8]) -> Option<Self> {
+        let mut parts = param.splitn(2, |byte| *byte == b'=');
+        let name = parts.next()?;
+        if name.is_empty() {
+            return None;
+        }
+        let value = parts.next();
+        Some(Self { name, value })
+    }
+}
+
 pub fn parse(value: &[u8]) -> Option<LuaDesync<'_>> {
     let mut parts = value.split(|byte| *byte == b':');
 
@@ -23,6 +41,71 @@ pub fn parse(value: &[u8]) -> Option<LuaDesync<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_desync_param_with_value() {
+        assert_eq!(
+            LuaDesyncParam::parse(b"wsize=1"),
+            Some(LuaDesyncParam {
+                name: b"wsize",
+                value: Some(b"1"),
+            })
+        );
+    }
+
+    #[test]
+    fn parses_bare_desync_param() {
+        assert_eq!(
+            LuaDesyncParam::parse(b"multisplit"),
+            Some(LuaDesyncParam {
+                name: b"multisplit",
+                value: None,
+            })
+        );
+    }
+
+    #[test]
+    fn preserves_commas_in_desync_param_value() {
+        assert_eq!(
+            LuaDesyncParam::parse(b"pos=1,midsld"),
+            Some(LuaDesyncParam {
+                name: b"pos",
+                value: Some(b"1,midsld"),
+            })
+        );
+    }
+
+    #[test]
+    fn preserves_empty_desync_param_value() {
+        assert_eq!(
+            LuaDesyncParam::parse(b"foo="),
+            Some(LuaDesyncParam {
+                name: b"foo",
+                value: Some(b""),
+            })
+        );
+    }
+
+    #[test]
+    fn preserves_additional_equals_in_desync_param_value() {
+        assert_eq!(
+            LuaDesyncParam::parse(b"foo=a=b=c"),
+            Some(LuaDesyncParam {
+                name: b"foo",
+                value: Some(b"a=b=c"),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_desync_param() {
+        assert_eq!(LuaDesyncParam::parse(b""), None);
+    }
+
+    #[test]
+    fn rejects_desync_param_with_empty_name() {
+        assert_eq!(LuaDesyncParam::parse(b"=value"), None);
+    }
 
     #[test]
     fn parses_desync_with_multiple_params() {
