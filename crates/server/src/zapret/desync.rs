@@ -14,6 +14,10 @@ impl<'a> LuaDesync<'a> {
     pub fn find_param(&self, name: &[u8]) -> Option<&LuaDesyncParam<'a>> {
         self.params.iter().find(|param| param.name == name)
     }
+
+    pub fn param_u32(&self, name: &[u8]) -> Option<u32> {
+        self.find_param(name).and_then(LuaDesyncParam::parse_u32)
+    }
 }
 
 impl<'a> LuaDesyncParam<'a> {
@@ -289,5 +293,50 @@ mod tests {
         };
 
         assert_eq!(param.parse_u32(), None);
+    }
+
+    #[test]
+    fn returns_numeric_desync_param() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![
+                LuaDesyncParam {
+                    name: b"wsize",
+                    value: Some(b"1"),
+                },
+                LuaDesyncParam {
+                    name: b"scale",
+                    value: Some(b"6"),
+                },
+            ],
+        };
+
+        assert_eq!(desync.param_u32(b"scale"), Some(6));
+    }
+
+    #[test]
+    fn returns_none_when_numeric_desync_param_is_absent() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![LuaDesyncParam {
+                name: b"wsize",
+                value: Some(b"1"),
+            }],
+        };
+
+        assert_eq!(desync.param_u32(b"scale"), None);
+    }
+
+    #[test]
+    fn returns_none_when_desync_param_is_not_numeric() {
+        let desync = LuaDesync {
+            function: b"wssize",
+            params: vec![LuaDesyncParam {
+                name: b"scale",
+                value: Some(b"abc"),
+            }],
+        };
+
+        assert_eq!(desync.param_u32(b"scale"), None);
     }
 }
