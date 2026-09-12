@@ -1,7 +1,10 @@
 use axum::{Json, http::StatusCode};
 use serde::Serialize;
 
-use crate::zapret::{LuaInit, NfqwsConfig, NfqwsProcess, find_nfqws2_process};
+use crate::zapret::{
+    LuaDesync, LuaDesyncError, LuaDesyncKind, LuaInit, NfqwsConfig, NfqwsProcess,
+    find_nfqws2_process,
+};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(super) struct Status {
@@ -16,6 +19,7 @@ struct ConfigStatus {
     queue_number: Option<u16>,
     fwmark: Option<u32>,
     lua_inits: Vec<LuaInitStatus>,
+    lua_desyncs: Vec<LuaDesyncStatus>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -23,6 +27,48 @@ struct ConfigStatus {
 enum LuaInitStatus {
     File(String),
     Code(String),
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum LuaDesyncStatus {
+    Wssize {
+        wsize: Option<u32>,
+        scale: Option<u32>,
+    },
+    Multidisorder {
+        positions: Vec<String>,
+    },
+    Unknown {
+        function: String,
+    },
+    Invalid {
+        function: String,
+    },
+}
+
+impl From<&LuaDesync<'_>> for LuaDesyncStatus {
+    fn from(desync: &LuaDesync<'_>) -> Self {
+        match desync.kind() {
+            Ok(LuaDesyncKind::Wssize(wssize)) => LuaDesyncStatus::Wssize {
+                wsize: wssize.wsize,
+                scale: wssize.scale,
+            },
+            Ok(LuaDesyncKind::Multidisorder(multidisorder)) => LuaDesyncStatus::Multidisorder {
+                positions: multidisorder
+                    .positions
+                    .iter()
+                    .map(|pos| String::from_utf8_lossy(pos).into_owned())
+                    .collect(),
+            },
+            Ok(LuaDesyncKind::Unknown(function)) => LuaDesyncStatus::Unknown {
+                function: String::from_utf8_lossy(function).into_owned(),
+            },
+            Err(LuaDesyncError::InvalidParams) => LuaDesyncStatus::Invalid {
+                function: String::from_utf8_lossy(desync.function).into_owned(),
+            },
+        }
+    }
 }
 
 impl From<&LuaInit<'_>> for LuaInitStatus {
@@ -40,11 +86,15 @@ impl From<&LuaInit<'_>> for LuaInitStatus {
 
 impl From<&NfqwsConfig<'_>> for ConfigStatus {
     fn from(config: &NfqwsConfig<'_>) -> Self {
-        let lua_inits = config.lua_inits.iter().map(LuaInitStatus::from).collect();
         Self {
             queue_number: config.queue_number,
             fwmark: config.fwmark,
-            lua_inits,
+            lua_inits: config.lua_inits.iter().map(LuaInitStatus::from).collect(),
+            lua_desyncs: config
+                .lua_desyncs
+                .iter()
+                .map(LuaDesyncStatus::from)
+                .collect(),
         }
     }
 }
@@ -94,7 +144,9 @@ mod tests {
                         --qnum=200\0\
                         --fwmark=0x10000000\0\
                         --lua-init=@/opt/zapret2/lua/zapret-lib.lua\0\
-                        --lua-init=MYVAR=123\0"
+                        --lua-init=MYVAR=123\0\
+                        --lua-desync=wssize:wsize=1:scale=6\0\
+                        --lua-desync=multidisorder:pos=1,midsld\0"
                 .to_vec(),
         };
 
@@ -118,6 +170,17 @@ mod tests {
                         {
                             "type": "Code",
                             "value": "MYVAR=123"
+                        }
+                    ],
+                    "lua_desyncs": [
+                        {
+                            "type": "wssize",
+                            "wsize": 1,
+                            "scale": 6
+                        },
+                        {
+                            "type": "multidisorder",
+                            "positions": ["1", "midsld"]
                         }
                     ]
                 }
@@ -160,9 +223,53 @@ mod tests {
                 "config": {
                     "queue_number": null,
                     "fwmark": null,
-                    "lua_inits": []
+                    "lua_inits": [],
+                    "lua_desyncs": []
                 }
             })
+        );
+    }
+
+    #[test]
+    fn exposes_unknown_lua_desync() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-desync=custom:param=1\0".to_vec(),
+        };
+
+        let status = Status::from(Some(process));
+        let json = serde_json::to_value(status).unwrap();
+
+        assert_eq!(
+            json["config"]["lua_desyncs"],
+            serde_json::json!([
+                {
+                    "type": "unknown",
+                    "function": "custom"
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn exposes_invalid_lua_desync() {
+        let process = NfqwsProcess {
+            pid: 123,
+            cmdline: b"/opt/zapret2/nfq2/nfqws2\0--lua-desync=multidisorder:pos=1,,midsld\0"
+                .to_vec(),
+        };
+
+        let status = Status::from(Some(process));
+        let json = serde_json::to_value(status).unwrap();
+
+        assert_eq!(
+            json["config"]["lua_desyncs"],
+            serde_json::json!([
+                {
+                    "type": "invalid",
+                    "function": "multidisorder"
+                }
+            ])
         );
     }
 }
