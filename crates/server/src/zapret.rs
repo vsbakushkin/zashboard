@@ -1,5 +1,6 @@
 mod argument;
 mod config;
+mod desync;
 mod process;
 
 pub use config::{LuaInit, NfqwsConfig};
