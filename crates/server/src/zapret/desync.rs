@@ -26,6 +26,12 @@ impl<'a> LuaDesyncParam<'a> {
         let value = parts.next();
         Some(Self { name, value })
     }
+
+    pub fn parse_u32(&self) -> Option<u32> {
+        self.value
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .and_then(|value| value.parse::<u32>().ok())
+    }
 }
 
 pub fn parse(value: &[u8]) -> Option<LuaDesync<'_>> {
@@ -253,5 +259,35 @@ mod tests {
     #[test]
     fn rejects_empty_param() {
         assert_eq!(parse(b"wssize::scale=6"), None);
+    }
+
+    #[test]
+    fn parses_desync_param_value_as_u32() {
+        let param = LuaDesyncParam {
+            name: b"scale",
+            value: Some(b"6"),
+        };
+
+        assert_eq!(param.parse_u32(), Some(6));
+    }
+
+    #[test]
+    fn returns_none_when_desync_param_has_no_value() {
+        let param = LuaDesyncParam {
+            name: b"multisplit",
+            value: None,
+        };
+
+        assert_eq!(param.parse_u32(), None);
+    }
+
+    #[test]
+    fn returns_none_when_desync_param_value_is_not_a_number() {
+        let param = LuaDesyncParam {
+            name: b"scale",
+            value: Some(b"abc"),
+        };
+
+        assert_eq!(param.parse_u32(), None);
     }
 }
