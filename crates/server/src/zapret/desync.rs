@@ -1,7 +1,7 @@
 #[derive(Debug, PartialEq, Eq)]
 pub struct LuaDesync<'a> {
     pub function: &'a [u8],
-    pub params: Vec<&'a [u8]>,
+    pub params: Vec<LuaDesyncParam<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -30,10 +30,9 @@ pub fn parse(value: &[u8]) -> Option<LuaDesync<'_>> {
         return None;
     }
 
-    let params: Vec<&[u8]> = parts.collect();
-    if params.iter().any(|param| param.is_empty()) {
-        return None;
-    }
+    let params: Vec<_> = parts
+        .map(LuaDesyncParam::parse)
+        .collect::<Option<Vec<_>>>()?;
 
     Some(LuaDesync { function, params })
 }
@@ -113,7 +112,16 @@ mod tests {
             parse(b"wssize:wsize=1:scale=6"),
             Some(LuaDesync {
                 function: b"wssize",
-                params: vec![b"wsize=1", b"scale=6"],
+                params: vec![
+                    LuaDesyncParam {
+                        name: b"wsize",
+                        value: Some(b"1"),
+                    },
+                    LuaDesyncParam {
+                        name: b"scale",
+                        value: Some(b"6"),
+                    },
+                ],
             })
         );
     }
@@ -124,7 +132,10 @@ mod tests {
             parse(b"multidisorder:pos=1,midsld"),
             Some(LuaDesync {
                 function: b"multidisorder",
-                params: vec![b"pos=1,midsld"],
+                params: vec![LuaDesyncParam {
+                    name: b"pos",
+                    value: Some(b"1,midsld"),
+                }],
             })
         );
     }
@@ -146,7 +157,16 @@ mod tests {
             parse(b"syndata:multisplit:strategy=23"),
             Some(LuaDesync {
                 function: b"syndata",
-                params: vec![b"multisplit", b"strategy=23"],
+                params: vec![
+                    LuaDesyncParam {
+                        name: b"multisplit",
+                        value: None,
+                    },
+                    LuaDesyncParam {
+                        name: b"strategy",
+                        value: Some(b"23"),
+                    },
+                ],
             })
         );
     }
