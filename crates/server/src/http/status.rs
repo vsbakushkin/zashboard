@@ -1,5 +1,6 @@
 use axum::{Json, http::StatusCode};
 use serde::Serialize;
+use std::io;
 
 use crate::zapret::{
     LuaDesync, LuaDesyncError, LuaDesyncKind, LuaInit, NfqwsConfig, NfqwsProcess,
@@ -125,7 +126,13 @@ impl From<Option<NfqwsProcess>> for Status {
 }
 
 pub(super) async fn status() -> Result<Json<Status>, StatusCode> {
-    let task_result = tokio::task::spawn_blocking(find_nfqws2_process)
+    status_with(find_nfqws2_process).await
+}
+
+async fn status_with(
+    find_process: impl FnOnce() -> io::Result<Option<NfqwsProcess>> + Send + 'static,
+) -> Result<Json<Status>, StatusCode> {
+    let task_result = tokio::task::spawn_blocking(find_process)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -271,5 +278,37 @@ mod tests {
                 }
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn returns_running_status() {
+        let response = status_with(|| {
+            Ok(Some(NfqwsProcess {
+                pid: 123,
+                cmdline: b"/opt/zapret2/nfq2/nfqws2\0--qnum=200\0".to_vec(),
+            }))
+        })
+        .await
+        .expect("status should succeed");
+
+        assert!(response.0.running);
+        assert_eq!(response.0.pid, Some(123));
+    }
+
+    #[tokio::test]
+    async fn returns_stopped_status() {
+        let response = status_with(|| Ok(None))
+            .await
+            .expect("status should succeed");
+
+        assert!(!response.0.running);
+        assert_eq!(response.0.pid, None);
+    }
+
+    #[tokio::test]
+    async fn returns_internal_server_error_when_process_lookup_fails() {
+        let result = status_with(|| Err(std::io::Error::other("process lookup failed"))).await;
+
+        assert_eq!(result.err(), Some(StatusCode::INTERNAL_SERVER_ERROR));
     }
 }
