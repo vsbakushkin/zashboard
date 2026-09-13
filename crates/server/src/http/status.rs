@@ -1,11 +1,10 @@
-use axum::{Json, http::StatusCode};
+use axum::{Json, extract::State, http::StatusCode};
 use serde::Serialize;
 use std::io;
 
-use crate::zapret::{
-    LuaDesync, LuaDesyncError, LuaDesyncKind, LuaInit, NfqwsConfig, NfqwsProcess,
-    find_nfqws2_process,
-};
+use super::AppState;
+
+use crate::zapret::{LuaDesync, LuaDesyncError, LuaDesyncKind, LuaInit, NfqwsConfig, NfqwsProcess};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub(super) struct Status {
@@ -125,8 +124,8 @@ impl From<Option<NfqwsProcess>> for Status {
     }
 }
 
-pub(super) async fn status() -> Result<Json<Status>, StatusCode> {
-    status_with(find_nfqws2_process).await
+pub(super) async fn status(State(state): State<AppState>) -> Result<Json<Status>, StatusCode> {
+    status_with(state.find_process).await
 }
 
 async fn status_with(
